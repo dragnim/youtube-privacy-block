@@ -1,0 +1,127 @@
+.youtube-embed-container {
+    position: relative;
+    width: 100%;
+    padding-bottom: 56.25% !important;
+    height: 0 !important;
+    background: #000;
+    cursor: pointer;
+    overflow: hidden;
+    display: block !important;
+    border-radius: 5px;
+}
+
+/* Scale min-height based on screen width for different breakpoints */
+/* Mobile Portrait (up to 767px) */
+@media (max-width: 767px) {
+    .youtube-embed-container {
+        min-height: calc(100vw * 0.5625 - 50px) !important;
+    }
+}
+
+/* Tablet Portrait (768px to 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+    .youtube-embed-container {
+        min-height: calc(50vw * 0.5625 - 50px) !important;
+    }
+}
+
+/* Ensure all children are absolutely positioned so they don't add to height */
+.youtube-embed-container > * {
+    position: absolute !important;
+}
+
+.youtube-thumbnail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.3s ease;
+}
+
+.youtube-thumbnail:hover {
+    opacity: 0.8;
+}
+
+.play-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px;
+    height: 56px;
+    background: rgba(255, 0, 0, 0.9);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.play-button:hover {
+    background: #ff0000;
+    transform: translate(-50%, -50%) scale(1.1);
+}
+
+.play-button::after {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 16px solid white;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    margin-left: 4px;
+}
+
+.privacy-notice {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: clamp(12px, 2.5vw, 14px);
+    line-height: 1.2em;
+    font-family: sans-serif;
+    opacity: 1;
+}
+
+.privacy-notice a {
+    color: #ccc;
+    text-decoration: underline;
+}
+
+/* Force proper spacing between widget and next element - APPLY AT ALL SIZES */
+.elementor-widget-youtube_privacy_embed {
+    margin-bottom: 20px !important;
+}
+
+/* Nuclear option - highest specificity to override Elementor */
+.elementor-element.elementor-widget.elementor-widget-youtube_privacy_embed {
+    margin-bottom: 10px !important; /* Reduced from 25px for desktop */
+}
+
+/* Tablet Portrait (768px to 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+    .elementor-element.elementor-widget.elementor-widget-youtube_privacy_embed {
+        margin-bottom: 0px !important;
+    }
+}
+
+/* Extra spacing for problematic mid-range screens */
+@media (max-width: 900px) {
+    .elementor-element.elementor-widget.elementor-widget-youtube_privacy_embed {
+        margin-bottom: 15px !important;
+    }
+}
+
+/* Mobile specific */
+@media (max-width: 767px) {
+    .elementor-element.elementor-widget.elementor-widget-youtube_privacy_embed {
+        margin-bottom: 25px !important;
+    }
+}
