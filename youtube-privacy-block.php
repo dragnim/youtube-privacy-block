@@ -1,9 +1,14 @@
 <?php
 /**
- * Plugin Name: YouTube Privacy Block & Elementor Widget
- * Description: A privacy-friendly YouTube embed block for Gutenberg and Elementor widget
- * Version: 1.1.0
- * Author: MikeM
+ * Plugin Name:       YouTube Privacy Block & Elementor Widget
+ * Description:       A privacy-friendly YouTube embed block for Gutenberg and Elementor widget
+ * Version:           1.2.1
+ * Requires at least: 6.3
+ * Requires PHP:      7.4
+ * Author:            MikeM
+ * Text Domain:       youtube-privacy
+ * Domain Path:       /languages
+ * Update URI:        false
  */
 
 // Prevent direct access
@@ -11,137 +16,418 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+define('YOUTUBE_PRIVACY_VERSION', '1.2.1');
+define('YOUTUBE_PRIVACY_OPTION', 'youtube_privacy_settings');
+define('YOUTUBE_PRIVACY_DEFAULT_URL', 'https://policies.google.com/privacy');
+
 class YouTubePrivacyPlugin {
 
     public function __construct() {
+        add_action('init', array($this, 'load_textdomain'), 1);
+        add_action('init', array($this, 'register_assets'), 5);
         add_action('init', array($this, 'register_block'));
-        add_action('wp_enqueue_scripts', array($this, 'enqueue_frontend_scripts'));
 
         // Elementor hooks
         add_action('elementor/widgets/register', array($this, 'register_elementor_widget'));
-        add_action('elementor/frontend/after_register_scripts', array($this, 'register_elementor_scripts'));
+        add_action('elementor/editor/after_enqueue_scripts', array($this, 'enqueue_elementor_editor_scripts'));
+
+        // Settings
+        add_action('admin_menu', array($this, 'add_settings_page'));
+        add_action('admin_init', array($this, 'register_settings'));
+        add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
     }
 
-    // Existing Gutenberg block functionality
-    public function register_block() {
-        // Register the block
-        register_block_type('youtube-privacy/embed', array(
-            'editor_script' => 'youtube-privacy-block-editor',
-            'editor_style' => 'youtube-privacy-block-editor-style',
-            'style' => 'youtube-privacy-block-style',
-            'render_callback' => array($this, 'render_block'),
-            'attributes' => array(
-                'videoUrl' => array(
-                    'type' => 'string',
-                    'default' => ''
-                ),
-                'thumbnailUrl' => array(
-                    'type' => 'string',
-                    'default' => ''
-                )
-            )
+    public function load_textdomain() {
+        load_plugin_textdomain('youtube-privacy', false, dirname(plugin_basename(__FILE__)) . '/languages');
+    }
+
+    /* ---------------------------------------------------------------------
+     * Settings
+     * ------------------------------------------------------------------ */
+
+    public function get_default_settings() {
+        return array(
+            'privacy_url' => YOUTUBE_PRIVACY_DEFAULT_URL,
+            'notice_text' => __('Click to load video from YouTube. This will enable YouTube tracking.', 'youtube-privacy'),
+            'link_text'   => __('YouTube Privacy Information', 'youtube-privacy'),
+        );
+    }
+
+    public function get_settings() {
+        $defaults = $this->get_default_settings();
+        $saved    = get_option(YOUTUBE_PRIVACY_OPTION);
+        $settings = $defaults;
+
+        if (is_array($saved)) {
+            foreach ($defaults as $key => $default) {
+                if (isset($saved[$key]) && $saved[$key] !== '') {
+                    $settings[$key] = $saved[$key];
+                }
+            }
+        }
+
+        return $settings;
+    }
+
+    public function get_privacy_url() {
+        $settings = $this->get_settings();
+        return $settings['privacy_url'];
+    }
+
+    public function add_settings_page() {
+        add_options_page(
+            __('YouTube Privacy', 'youtube-privacy'),
+            __('YouTube Privacy', 'youtube-privacy'),
+            'manage_options',
+            'youtube-privacy',
+            array($this, 'render_settings_page')
+        );
+    }
+
+    public function add_settings_link($links) {
+        $url = admin_url('options-general.php?page=youtube-privacy');
+        array_unshift($links, '<a href="' . esc_url($url) . '">' . esc_html__('Settings', 'youtube-privacy') . '</a>');
+        return $links;
+    }
+
+    public function register_settings() {
+        register_setting('youtube_privacy', YOUTUBE_PRIVACY_OPTION, array(
+            'type'              => 'array',
+            'sanitize_callback' => array($this, 'sanitize_settings'),
         ));
 
-        // Enqueue editor scripts
-        wp_register_script(
-            'youtube-privacy-block-editor',
-            plugin_dir_url(__FILE__) . 'block.js',
-            array('wp-blocks', 'wp-element', 'wp-editor', 'wp-components'),
-            '1.0.0'
+        add_settings_section('youtube_privacy_main', '', '__return_false', 'youtube-privacy');
+
+        $defaults = $this->get_default_settings();
+
+        add_settings_field(
+            'notice_text',
+            __('Notice text', 'youtube-privacy'),
+            array($this, 'render_text_field'),
+            'youtube-privacy',
+            'youtube_privacy_main',
+            array(
+                'label_for'   => 'youtube_privacy_notice_text',
+                'key'         => 'notice_text',
+                'type'        => 'text',
+                'placeholder' => $defaults['notice_text'],
+                'description' => __('Shown on every embed before the video loads. Leave blank to use the default.', 'youtube-privacy'),
+            )
         );
 
-        // Enqueue editor styles
-        wp_register_style(
-            'youtube-privacy-block-editor-style',
-            plugin_dir_url(__FILE__) . 'editor.css',
-            array('wp-edit-blocks'),
-            '1.0.0'
+        add_settings_field(
+            'link_text',
+            __('Link text', 'youtube-privacy'),
+            array($this, 'render_text_field'),
+            'youtube-privacy',
+            'youtube_privacy_main',
+            array(
+                'label_for'   => 'youtube_privacy_link_text',
+                'key'         => 'link_text',
+                'type'        => 'text',
+                'placeholder' => $defaults['link_text'],
+                'description' => __('Leave blank to use the default.', 'youtube-privacy'),
+            )
         );
 
-        // Enqueue frontend styles
-        wp_register_style(
-            'youtube-privacy-block-style',
-            plugin_dir_url(__FILE__) . 'style.css',
-            array(),
-            '1.0.0'
+        add_settings_field(
+            'privacy_url',
+            __('Privacy policy link', 'youtube-privacy'),
+            array($this, 'render_text_field'),
+            'youtube-privacy',
+            'youtube_privacy_main',
+            array(
+                'label_for'   => 'youtube_privacy_privacy_url',
+                'key'         => 'privacy_url',
+                'type'        => 'url',
+                'placeholder' => YOUTUBE_PRIVACY_DEFAULT_URL,
+                'description' => __('Leave blank to use the default Google privacy policy.', 'youtube-privacy'),
+            )
         );
     }
 
-    public function enqueue_frontend_scripts() {
-        wp_enqueue_script(
+    public function sanitize_settings($input) {
+        $input = is_array($input) ? $input : array();
+
+        return array(
+            'privacy_url' => isset($input['privacy_url']) ? esc_url_raw(trim($input['privacy_url'])) : '',
+            'notice_text' => isset($input['notice_text']) ? sanitize_text_field($input['notice_text']) : '',
+            'link_text'   => isset($input['link_text']) ? sanitize_text_field($input['link_text']) : '',
+        );
+    }
+
+    public function render_text_field($args) {
+        $saved = get_option(YOUTUBE_PRIVACY_OPTION);
+        $value = (is_array($saved) && isset($saved[$args['key']])) ? $saved[$args['key']] : '';
+
+        printf(
+            '<input type="%1$s" id="%2$s" name="%3$s[%4$s]" value="%5$s" class="regular-text" placeholder="%6$s" aria-describedby="%2$s-description"><p class="description" id="%2$s-description">%7$s</p>',
+            esc_attr($args['type']),
+            esc_attr($args['label_for']),
+            esc_attr(YOUTUBE_PRIVACY_OPTION),
+            esc_attr($args['key']),
+            esc_attr($value),
+            esc_attr($args['placeholder']),
+            esc_html($args['description'])
+        );
+    }
+
+    public function render_settings_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html__('YouTube Privacy', 'youtube-privacy'); ?></h1>
+            <form action="options.php" method="post">
+                <?php
+                settings_fields('youtube_privacy');
+                do_settings_sections('youtube-privacy');
+                submit_button();
+                ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    /* ---------------------------------------------------------------------
+     * Assets
+     * ------------------------------------------------------------------ */
+
+    public function register_assets() {
+        $url = plugin_dir_url(__FILE__);
+
+        wp_register_script(
             'youtube-privacy-frontend',
-            plugin_dir_url(__FILE__) . 'frontend.js',
+            $url . 'frontend.js',
             array(),
-            '1.0.0',
+            YOUTUBE_PRIVACY_VERSION,
             true
         );
+
+        // Legacy handle, kept as an alias for anything that depended on it.
+        wp_register_script('youtube-privacy-elementor', false, array('youtube-privacy-frontend'), YOUTUBE_PRIVACY_VERSION, true);
+
+        wp_register_style(
+            'youtube-privacy-block-style',
+            $url . 'style.css',
+            array(),
+            YOUTUBE_PRIVACY_VERSION
+        );
+
+        // Shared URL parser for the block editor and Elementor editor (mirrors extract_video_id()).
+        wp_register_script(
+            'youtube-privacy-url-parser',
+            $url . 'url-parser.js',
+            array(),
+            YOUTUBE_PRIVACY_VERSION
+        );
+
+        wp_register_script(
+            'youtube-privacy-block-editor',
+            $url . 'block.js',
+            array('wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n', 'youtube-privacy-url-parser'),
+            YOUTUBE_PRIVACY_VERSION
+        );
+
+        wp_register_style(
+            'youtube-privacy-block-editor-style',
+            $url . 'editor.css',
+            array(),
+            YOUTUBE_PRIVACY_VERSION
+        );
+
+        $settings = $this->get_settings();
+        wp_add_inline_script(
+            'youtube-privacy-block-editor',
+            'window.youtubePrivacyEditor = ' . wp_json_encode(array(
+                'defaultThumbnail' => $url . 'default-thumbnail.jpg',
+                'noticeText'       => $settings['notice_text'],
+                'linkText'         => $settings['link_text'],
+            )) . ';',
+            'before'
+        );
+        wp_set_script_translations('youtube-privacy-block-editor', 'youtube-privacy', plugin_dir_path(__FILE__) . 'languages');
     }
 
-    // Elementor functionality
+    public function enqueue_frontend_assets() {
+        wp_enqueue_script('youtube-privacy-frontend');
+        wp_enqueue_style('youtube-privacy-block-style');
+    }
+
+    /* ---------------------------------------------------------------------
+     * Block editor
+     * ------------------------------------------------------------------ */
+
+    public function register_block() {
+        register_block_type(__DIR__, array(
+            'render_callback' => array($this, 'render_block'),
+        ));
+    }
+
+    public function render_block($attributes) {
+        $video_url     = isset($attributes['videoUrl']) ? $attributes['videoUrl'] : '';
+        $thumbnail_url = isset($attributes['thumbnailUrl']) ? $attributes['thumbnailUrl'] : '';
+        $video_title   = isset($attributes['videoTitle']) ? $attributes['videoTitle'] : '';
+
+        return $this->render_youtube_embed($video_url, $thumbnail_url, '', true, $video_title);
+    }
+
+    /* ---------------------------------------------------------------------
+     * Elementor
+     * ------------------------------------------------------------------ */
+
+    public function enqueue_elementor_editor_scripts() {
+        wp_enqueue_script('youtube-privacy-url-parser');
+    }
+
     public function register_elementor_widget($widgets_manager) {
-        require_once(__DIR__ . '/elementor-widget.php');
+        require_once __DIR__ . '/elementor-widget.php';
         $widgets_manager->register(new \YouTube_Privacy_Elementor_Widget());
     }
 
-    public function register_elementor_scripts() {
-        wp_register_script(
-            'youtube-privacy-elementor',
-            plugin_dir_url(__FILE__) . 'frontend.js',
-            array(),
-            '1.0.0',
-            true
-        );
+    /* ---------------------------------------------------------------------
+     * Rendering (shared by block and Elementor)
+     * ------------------------------------------------------------------ */
+
+    private function editor_message($message) {
+        // Only editors see setup messages; visitors see nothing.
+        if (!current_user_can('edit_posts')) {
+            return '';
+        }
+        return '<p class="youtube-privacy-editor-message">' . esc_html($message) . '</p>';
     }
 
-    // Shared render method used by both Gutenberg and Elementor
-    public function render_youtube_embed($video_url, $thumbnail_url = '', $additional_classes = '') {
+    public function render_youtube_embed($video_url, $thumbnail_url = '', $additional_classes = '', $is_block = false, $video_title = '') {
         if (empty($video_url)) {
-            return '<p>Please enter a YouTube video URL.</p>';
+            return $this->editor_message(__('Please enter a YouTube video URL.', 'youtube-privacy'));
         }
 
-        // Extract video ID from URL
         $video_id = $this->extract_video_id($video_url);
 
         if (!$video_id) {
-            return '<p>Invalid YouTube URL. Please use a valid YouTube video link.</p>';
+            return $this->editor_message(__('Invalid YouTube URL. Please use a valid YouTube video link.', 'youtube-privacy'));
         }
 
-        // Use default thumbnail if none provided
+        $this->enqueue_frontend_assets();
+
         if (empty($thumbnail_url)) {
             $thumbnail_url = plugin_dir_url(__FILE__) . 'default-thumbnail.jpg';
         }
 
+        $settings = $this->get_settings();
+        $start    = $this->extract_start_time($video_url);
+
+        $video_title = trim(wp_strip_all_tags((string) $video_title));
+
+        if ($video_title !== '') {
+            /* translators: %s: video title */
+            $play_label   = sprintf(__('Play “%s”', 'youtube-privacy'), $video_title);
+            $iframe_title = $video_title;
+        } else {
+            $play_label   = __('Play YouTube video', 'youtube-privacy');
+            $iframe_title = __('YouTube video player', 'youtube-privacy');
+        }
+
+        $attributes = array(
+            'data-video-id'     => $video_id,
+            'data-iframe-title' => $iframe_title,
+        );
+        if ($start > 0) {
+            $attributes['data-start'] = (string) $start;
+        }
+
+        if ($is_block && function_exists('get_block_wrapper_attributes')) {
+            // Adds block classes (custom class, alignment) and spacing styles to the container itself.
+            $attributes['class'] = 'youtube-embed-container';
+            $attribute_string = get_block_wrapper_attributes($attributes);
+        } else {
+            $classes = trim('youtube-embed-container ' . $additional_classes);
+            $attribute_string = 'class="' . esc_attr($classes) . '"';
+            foreach ($attributes as $name => $value) {
+                $attribute_string .= ' ' . $name . '="' . esc_attr($value) . '"';
+            }
+        }
+
+        // Random suffix keeps IDs unique even when Elementor caches widget HTML.
+        $notice_id = 'youtube-privacy-notice-' . substr(str_replace('-', '', wp_generate_uuid4()), 0, 12);
+
         return sprintf(
-            '<div class="youtube-embed-container %s" data-video-id="%s">
-                <img class="youtube-thumbnail" src="%s" alt="Video thumbnail">
-                <div class="play-button"></div>
-                <div class="privacy-notice">
-                    Click to load video from YouTube. This will enable YouTube tracking. 
-                    <a href="https://support.google.com/youtube/answer/10364219" target="_blank">YouTube Privacy Information</a>
-                </div>
-            </div>',
-            esc_attr($additional_classes),
-            esc_attr($video_id),
-            esc_url($thumbnail_url)
+            '<div %1$s><img class="youtube-thumbnail" src="%2$s" alt="" loading="lazy" decoding="async"><button type="button" class="play-button" aria-label="%3$s" aria-describedby="%8$s"></button><div class="privacy-notice"><span id="%8$s">%4$s</span> <a href="%5$s" target="_blank" rel="noopener noreferrer">%6$s<span class="youtube-privacy-sr-only"> %7$s</span></a></div></div>',
+            $attribute_string,
+            esc_url($thumbnail_url),
+            esc_attr($play_label),
+            esc_html($settings['notice_text']),
+            esc_url($settings['privacy_url']),
+            esc_html($settings['link_text']),
+            esc_html__('(opens in a new tab)', 'youtube-privacy'),
+            esc_attr($notice_id)
         );
     }
 
-    // Gutenberg block render callback
-    public function render_block($attributes) {
-        $video_url = isset($attributes['videoUrl']) ? $attributes['videoUrl'] : '';
-        $thumbnail_url = isset($attributes['thumbnailUrl']) ? $attributes['thumbnailUrl'] : '';
-        $custom_class = isset($attributes['className']) ? $attributes['className'] : '';
+    /* ---------------------------------------------------------------------
+     * URL parsing
+     * ------------------------------------------------------------------ */
 
-        return $this->render_youtube_embed($video_url, $thumbnail_url, $custom_class);
+    private function parse_youtube_url($url) {
+        $url = trim((string) $url);
+
+        if (!preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)) {
+            $url = 'https://' . $url;
+        }
+
+        $parts = wp_parse_url($url);
+        if (empty($parts['host'])) {
+            return false;
+        }
+
+        $parts['host'] = strtolower(preg_replace('/^(www\.|m\.|music\.)/i', '', $parts['host']));
+        $parts['path'] = isset($parts['path']) ? $parts['path'] : '';
+
+        $query = array();
+        if (!empty($parts['query'])) {
+            parse_str($parts['query'], $query);
+        }
+        $parts['query_args'] = $query;
+
+        return $parts;
     }
 
     public function extract_video_id($url) {
-        // Handle various YouTube URL formats
+        $url = trim((string) $url);
+
+        // A bare 11-character video ID
+        if (preg_match('/^[A-Za-z0-9_-]{11}$/', $url)) {
+            return $url;
+        }
+
+        $parts = $this->parse_youtube_url($url);
+
+        if ($parts) {
+            $id = '';
+
+            if ($parts['host'] === 'youtu.be') {
+                $id = ltrim($parts['path'], '/');
+            } elseif (in_array($parts['host'], array('youtube.com', 'youtube-nocookie.com'), true)) {
+                if ($parts['path'] === '/watch' && isset($parts['query_args']['v'])) {
+                    $id = $parts['query_args']['v'];
+                } elseif (preg_match('#^/(embed|v|shorts|live)/([^/?]+)#', $parts['path'], $m)) {
+                    $id = $m[2];
+                }
+            }
+
+            $id = is_string($id) ? explode('/', $id)[0] : '';
+            if (preg_match('/^[A-Za-z0-9_-]{11}$/', $id)) {
+                return $id;
+            }
+        }
+
+        // Fallback for URLs with extra text around them (accepted by earlier versions).
+        // youtube.com / youtu.be must be the real host (at the start, after whitespace or after "://"),
+        // and the ID must be exactly 11 characters.
         $patterns = array(
-            '/youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/',
-            '/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/',
-            '/youtu\.be\/([a-zA-Z0-9_-]+)/',
-            '/youtube\.com\/v\/([a-zA-Z0-9_-]+)/'
+            '~(?:^(?://)?|[\s"\'(<]|://)(?:(?:www|m|music)\.)?youtube(?:-nocookie)?\.com/(?:watch\?(?:[^\s#]*&)?v=|embed/|v/|shorts/|live/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])~i',
+            '~(?:^(?://)?|[\s"\'(<]|://)youtu\.be/([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])~i',
         );
 
         foreach ($patterns as $pattern) {
@@ -152,415 +438,41 @@ class YouTubePrivacyPlugin {
 
         return false;
     }
+
+    public function extract_start_time($url) {
+        $parts = $this->parse_youtube_url($url);
+        if (!$parts) {
+            return 0;
+        }
+
+        $value = '';
+        if (isset($parts['query_args']['t'])) {
+            $value = $parts['query_args']['t'];
+        } elseif (isset($parts['query_args']['start'])) {
+            $value = $parts['query_args']['start'];
+        } elseif (!empty($parts['fragment']) && preg_match('/(?:^|&)t=([^&]+)/', $parts['fragment'], $m)) {
+            $value = $m[1];
+        }
+
+        if (!is_string($value) || $value === '') {
+            return 0;
+        }
+
+        if (ctype_digit($value)) {
+            return (int) $value;
+        }
+
+        // Formats like 90s, 1m30s, 1h2m3s
+        if (preg_match('/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i', $value, $m) && $value !== '') {
+            $h = isset($m[1]) ? (int) $m[1] : 0;
+            $min = isset($m[2]) ? (int) $m[2] : 0;
+            $s = isset($m[3]) ? (int) $m[3] : 0;
+            return $h * 3600 + $min * 60 + $s;
+        }
+
+        return 0;
+    }
 }
 
 // Initialize the plugin
 $youtube_privacy_plugin = new YouTubePrivacyPlugin();
-
-// Create block.js file content
-function create_block_js_file() {
-    $js_content = <<<'EOD'
-(function() {
-    var el = wp.element.createElement;
-    var __ = wp.i18n.__;
-    var registerBlockType = wp.blocks.registerBlockType;
-    var InspectorControls = wp.blockEditor.InspectorControls;
-    var PanelBody = wp.components.PanelBody;
-    var TextControl = wp.components.TextControl;
-    var MediaUpload = wp.blockEditor.MediaUpload;
-    var Button = wp.components.Button;
-
-    registerBlockType('youtube-privacy/embed', {
-        title: __('YouTube Privacy Embed'),
-        icon: 'video-alt3',
-        category: 'embed',
-        attributes: {
-            videoUrl: {
-                type: 'string',
-                default: ''
-            },
-            thumbnailUrl: {
-                type: 'string',
-                default: ''
-            }
-        },
-        edit: function(props) {
-            var attributes = props.attributes;
-            var setAttributes = props.setAttributes;
-
-            function onVideoUrlChange(newUrl) {
-                setAttributes({ videoUrl: newUrl });
-            }
-
-            function onThumbnailSelect(media) {
-                setAttributes({ thumbnailUrl: media.url });
-            }
-
-            var editorClassName = 'youtube-privacy-block-editor' + (attributes.className ? ' ' + attributes.className : '');
-
-            return [
-                el(InspectorControls, {},
-                    el(PanelBody, { title: 'Video Settings' },
-                        el(TextControl, {
-                            label: 'YouTube Video URL',
-                            value: attributes.videoUrl,
-                            onChange: onVideoUrlChange,
-                            placeholder: 'https://www.youtube.com/watch?v=...'
-                        }),
-                        el('div', { style: { marginTop: '16px' } },
-                            el('label', { style: { display: 'block', marginBottom: '8px' } }, 'Custom Thumbnail (optional)'),
-                            el(MediaUpload, {
-                                onSelect: onThumbnailSelect,
-                                allowedTypes: ['image'],
-                                value: attributes.thumbnailUrl,
-                                render: function(obj) {
-                                    return el(Button, {
-                                        onClick: obj.open,
-                                        className: attributes.thumbnailUrl ? 'button' : 'button button-large'
-                                    }, attributes.thumbnailUrl ? 'Change Thumbnail' : 'Select Thumbnail');
-                                }
-                            })
-                        )
-                    )
-                ),
-                el('div', {
-                    className: editorClassName,
-                    style: {
-                        border: '2px dashed #ccc',
-                        padding: '20px',
-                        textAlign: 'center',
-                        backgroundColor: '#f9f9f9'
-                    }
-                },
-                    el('div', { className: 'dashicons dashicons-video-alt3', style: { fontSize: '48px', color: '#666' } }),
-                    el('h3', {}, 'YouTube Privacy Embed'),
-                    el('p', {}, attributes.videoUrl ? 'Video: ' + attributes.videoUrl : 'Enter a YouTube URL in the sidebar to get started'),
-                    attributes.thumbnailUrl && el('p', {}, 'Custom thumbnail selected')
-                )
-            ];
-        },
-        save: function() {
-            return null; // Server-side rendering
-        }
-    });
-})();
-EOD;
-
-    file_put_contents(plugin_dir_path(__FILE__) . 'block.js', $js_content);
-}
-
-// Create elementor-widget.php file
-function create_elementor_widget_file() {
-    $widget_content = <<<'EOD'
-<?php
-if (!defined('ABSPATH')) {
-    exit; // Exit if accessed directly.
-}
-
-class YouTube_Privacy_Elementor_Widget extends \Elementor\Widget_Base {
-
-    public function get_name() {
-        return 'youtube_privacy_embed';
-    }
-
-    public function get_title() {
-        return esc_html__('YouTube Privacy Embed', 'youtube-privacy');
-    }
-
-    public function get_icon() {
-        return 'eicon-youtube';
-    }
-
-    public function get_categories() {
-        return ['general'];
-    }
-
-    public function get_keywords() {
-        return ['youtube', 'video', 'privacy', 'embed'];
-    }
-
-    public function get_script_depends() {
-        return ['youtube-privacy-elementor'];
-    }
-
-    public function get_style_depends() {
-        return ['youtube-privacy-block-style'];
-    }
-
-    protected function register_controls() {
-        // Content Section
-        $this->start_controls_section(
-            'content_section',
-            [
-                'label' => esc_html__('Video Content', 'youtube-privacy'),
-                'tab' => \Elementor\Controls_Manager::TAB_CONTENT,
-            ]
-        );
-
-        $this->add_control(
-            'video_url',
-            [
-                'label' => esc_html__('YouTube Video URL', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::URL,
-                'placeholder' => esc_html__('https://www.youtube.com/watch?v=...', 'youtube-privacy'),
-                'description' => esc_html__('Enter the full YouTube video URL', 'youtube-privacy'),
-            ]
-        );
-
-        $this->add_control(
-            'custom_thumbnail',
-            [
-                'label' => esc_html__('Custom Thumbnail', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::MEDIA,
-                'description' => esc_html__('Upload a custom thumbnail image (optional)', 'youtube-privacy'),
-            ]
-        );
-
-        $this->end_controls_section();
-
-        // Style Section
-        $this->start_controls_section(
-            'style_section',
-            [
-                'label' => esc_html__('Style', 'youtube-privacy'),
-                'tab' => \Elementor\Controls_Manager::TAB_STYLE,
-            ]
-        );
-
-        $this->add_responsive_control(
-            'container_border_radius',
-            [
-                'label' => esc_html__('Border Radius', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::DIMENSIONS,
-                'size_units' => ['px', '%', 'em'],
-                'selectors' => [
-                    '{{WRAPPER}} .youtube-embed-container' => 'border-radius: {{TOP}}{{UNIT}} {{RIGHT}}{{UNIT}} {{BOTTOM}}{{UNIT}} {{LEFT}}{{UNIT}};',
-                ],
-            ]
-        );
-
-        $this->add_group_control(
-            \Elementor\Group_Control_Box_Shadow::get_type(),
-            [
-                'name' => 'container_box_shadow',
-                'label' => esc_html__('Box Shadow', 'youtube-privacy'),
-                'selector' => '{{WRAPPER}} .youtube-embed-container',
-            ]
-        );
-
-        $this->add_control(
-            'play_button_color',
-            [
-                'label' => esc_html__('Play Button Color', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-                'selectors' => [
-                    '{{WRAPPER}} .play-button' => 'background-color: {{VALUE}};',
-                ],
-            ]
-        );
-
-        $this->add_control(
-            'privacy_notice_bg',
-            [
-                'label' => esc_html__('Privacy Notice Background', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-                'selectors' => [
-                    '{{WRAPPER}} .privacy-notice' => 'background-color: {{VALUE}};',
-                ],
-            ]
-        );
-
-        $this->add_control(
-            'privacy_notice_color',
-            [
-                'label' => esc_html__('Privacy Notice Text Color', 'youtube-privacy'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-                'selectors' => [
-                    '{{WRAPPER}} .privacy-notice' => 'color: {{VALUE}};',
-                ],
-            ]
-        );
-
-        $this->end_controls_section();
-    }
-
-    protected function render() {
-        $settings = $this->get_settings_for_display();
-
-        $video_url = isset($settings['video_url']['url']) ? $settings['video_url']['url'] : '';
-        $thumbnail_url = isset($settings['custom_thumbnail']['url']) ? $settings['custom_thumbnail']['url'] : '';
-
-        // Get the plugin instance to use the shared render method
-        global $youtube_privacy_plugin;
-
-        if ($youtube_privacy_plugin && method_exists($youtube_privacy_plugin, 'render_youtube_embed')) {
-            echo $youtube_privacy_plugin->render_youtube_embed($video_url, $thumbnail_url);
-        } else {
-            echo '<p>YouTube Privacy Plugin not available.</p>';
-        }
-    }
-
-    protected function content_template() {
-        ?>
-        <#
-        var videoUrl = settings.video_url.url || '';
-        var thumbnailUrl = settings.custom_thumbnail.url || '';
-        #>
-        <div class="youtube-embed-container" style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0; background: #000; border-radius: 5px;">
-            <# if (thumbnailUrl) { #>
-                <img src="{{{ thumbnailUrl }}}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;" alt="Video thumbnail">
-            <# } else { #>
-                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 18px;">
-                    <i class="eicon-youtube" style="font-size: 48px; margin-bottom: 10px; display: block;"></i>
-                    <# if (videoUrl) { #>
-                        YouTube Video Preview
-                    <# } else { #>
-                        Enter YouTube URL
-                    <# } #>
-                </div>
-            <# } #>
-            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 56px; background: rgba(255, 0, 0, 0.9); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
-                <div style="width: 0; height: 0; border-left: 16px solid white; border-top: 10px solid transparent; border-bottom: 10px solid transparent; margin-left: 4px;"></div>
-            </div>
-            <div style="position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); color: white; padding: 8px 12px; border-radius: 4px; font-size: 14px;">
-                Click to load video from YouTube. This will enable YouTube tracking. 
-                <a href="https://support.google.com/youtube/answer/10364219" target="_blank" style="color: #ccc; text-decoration: underline;">YouTube Privacy Information</a>
-            </div>
-        </div>
-        <?php
-    }
-}
-EOD;
-
-    file_put_contents(plugin_dir_path(__FILE__) . 'elementor-widget.php', $widget_content);
-}
-
-// Create CSS files
-function create_css_files() {
-    $style_css = <<<'EOD'
-.youtube-embed-container {
-    position: relative;
-    width: 100%;
-    padding-bottom: 56.25%;
-    height: 0;
-    background: #000;
-    cursor: pointer;
-    overflow: hidden;
-    border-radius: 5px;
-}
-
-.youtube-thumbnail {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: opacity 0.3s ease;
-}
-
-.youtube-thumbnail:hover {
-    opacity: 0.8;
-}
-
-.play-button {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 80px;
-    height: 56px;
-    background: rgba(255, 0, 0, 0.9);
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-}
-
-.play-button:hover {
-    background: #ff0000;
-    transform: translate(-50%, -50%) scale(1.1);
-}
-
-.play-button::after {
-    content: '';
-    width: 0;
-    height: 0;
-    border-left: 16px solid white;
-    border-top: 10px solid transparent;
-    border-bottom: 10px solid transparent;
-    margin-left: 4px;
-}
-
-.privacy-notice {
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    right: 10px;
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 14px;
-    font-family: sans-serif;
-    opacity: 1;
-}
-
-.privacy-notice a {
-    color: #ccc;
-    text-decoration: underline;
-}
-EOD;
-
-    $editor_css = <<<'EOD'
-.youtube-privacy-block-editor {
-    border: 2px dashed #ccc;
-    padding: 20px;
-    text-align: center;
-    background-color: #f9f9f9;
-}
-EOD;
-
-    file_put_contents(plugin_dir_path(__FILE__) . 'style.css', $style_css);
-    file_put_contents(plugin_dir_path(__FILE__) . 'editor.css', $editor_css);
-}
-
-// Create frontend JavaScript
-function create_frontend_js() {
-    $js_content = <<<'EOD'
-document.addEventListener('DOMContentLoaded', function() {
-    const containers = document.querySelectorAll('.youtube-embed-container');
-
-    containers.forEach(container => {
-        container.addEventListener('click', function(e) {
-            // Don't load video if user clicked on the privacy link
-            if (e.target.tagName === 'A') {
-                return;
-            }
-
-            const videoId = this.dataset.videoId;
-            const iframe = document.createElement('iframe');
-            iframe.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:none;';
-            iframe.src = 'https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1';
-            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-            iframe.allowFullscreen = true;
-
-            this.innerHTML = '';
-            this.appendChild(iframe);
-        });
-    });
-});
-EOD;
-
-    file_put_contents(plugin_dir_path(__FILE__) . 'frontend.js', $js_content);
-}
-
-// Hook to create files when plugin is activated
-register_activation_hook(__FILE__, function() {
-    create_block_js_file();
-    create_elementor_widget_file();
-    create_css_files();
-    create_frontend_js();
-});

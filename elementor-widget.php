@@ -26,7 +26,7 @@ class YouTube_Privacy_Elementor_Widget extends \Elementor\Widget_Base {
     }
 
     public function get_script_depends() {
-        return ['youtube-privacy-elementor'];
+        return ['youtube-privacy-frontend'];
     }
 
     public function get_style_depends() {
@@ -49,7 +49,19 @@ class YouTube_Privacy_Elementor_Widget extends \Elementor\Widget_Base {
                 'label' => esc_html__('YouTube Video URL', 'youtube-privacy'),
                 'type' => \Elementor\Controls_Manager::URL,
                 'placeholder' => esc_html__('https://www.youtube.com/watch?v=...', 'youtube-privacy'),
-                'description' => esc_html__('Enter the full YouTube video URL', 'youtube-privacy'),
+                'description' => esc_html__('Supports watch, youtu.be, Shorts and live links. Start times (t=) are kept.', 'youtube-privacy'),
+                'options' => false,
+                'label_block' => true,
+            ]
+        );
+
+        $this->add_control(
+            'video_title',
+            [
+                'label' => esc_html__('Video title (optional)', 'youtube-privacy'),
+                'type' => \Elementor\Controls_Manager::TEXT,
+                'label_block' => true,
+                'description' => esc_html__('Used by screen readers, e.g. “Play ‘Your title’”. Not shown on the page.', 'youtube-privacy'),
             ]
         );
 
@@ -135,45 +147,55 @@ class YouTube_Privacy_Elementor_Widget extends \Elementor\Widget_Base {
         
         $video_url = isset($settings['video_url']['url']) ? $settings['video_url']['url'] : '';
         $thumbnail_url = isset($settings['custom_thumbnail']['url']) ? $settings['custom_thumbnail']['url'] : '';
+        $video_title = isset($settings['video_title']) ? $settings['video_title'] : '';
         
         // Get the plugin instance to use the shared render method
         global $youtube_privacy_plugin;
         
         if ($youtube_privacy_plugin && method_exists($youtube_privacy_plugin, 'render_youtube_embed')) {
-            echo $youtube_privacy_plugin->render_youtube_embed($video_url, $thumbnail_url);
+            echo $youtube_privacy_plugin->render_youtube_embed($video_url, $thumbnail_url, '', false, $video_title);
         } else {
             echo '<p>YouTube Privacy Plugin not available.</p>';
         }
     }
 
     protected function content_template() {
+        global $youtube_privacy_plugin;
+
+        if ($youtube_privacy_plugin && method_exists($youtube_privacy_plugin, 'get_settings')) {
+            $settings = $youtube_privacy_plugin->get_settings();
+        } else {
+            $settings = array(
+                'privacy_url' => YOUTUBE_PRIVACY_DEFAULT_URL,
+                'notice_text' => __('Click to load video from YouTube. This will enable YouTube tracking.', 'youtube-privacy'),
+                'link_text'   => __('YouTube Privacy Information', 'youtube-privacy'),
+            );
+        }
+
+        $default_thumbnail = plugin_dir_url(__FILE__) . 'default-thumbnail.jpg';
         ?>
         <#
-        var videoUrl = settings.video_url.url || '';
-        var thumbnailUrl = settings.custom_thumbnail.url || '';
+        var videoUrl = ( settings.video_url && settings.video_url.url ) ? settings.video_url.url : '';
+        var thumbnailUrl = ( settings.custom_thumbnail && settings.custom_thumbnail.url ) ? settings.custom_thumbnail.url : '<?php echo esc_js($default_thumbnail); ?>';
+        var videoTitle = ( settings.video_title || '' ).trim();
+        /* translators: %s: video title */
+        var playLabel = videoTitle ? '<?php echo esc_js(__('Play “%s”', 'youtube-privacy')); ?>'.replace( '%s', function () { return videoTitle; } ) : '<?php echo esc_js(__('Play YouTube video', 'youtube-privacy')); ?>';
+        var isValid = ( typeof window.youtubePrivacyGetVideoId === 'function' ) ? !! window.youtubePrivacyGetVideoId( videoUrl ) : true;
         #>
-        <div class="youtube-embed-container" style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0; background: #000; border-radius: 5px;">
-            <# if (thumbnailUrl) { #>
-                <img src="{{{ thumbnailUrl }}}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;" alt="Video thumbnail">
-            <# } else { #>
-                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 18px;">
-                    <i class="eicon-youtube" style="font-size: 48px; margin-bottom: 10px; display: block;"></i>
-                    <# if (videoUrl) { #>
-                        YouTube Video Preview
-                    <# } else { #>
-                        Enter YouTube URL
-                    <# } #>
+        <# if ( ! videoUrl ) { #>
+            <p class="youtube-privacy-editor-message"><?php echo esc_html__('Please enter a YouTube video URL.', 'youtube-privacy'); ?></p>
+        <# } else if ( ! isValid ) { #>
+            <p class="youtube-privacy-editor-message"><?php echo esc_html__('Invalid YouTube URL. Please use a valid YouTube video link.', 'youtube-privacy'); ?></p>
+        <# } else { #>
+            <div class="youtube-embed-container">
+                <img class="youtube-thumbnail" src="{{ thumbnailUrl }}" alt="">
+                <button type="button" class="play-button" aria-label="{{ playLabel }}" aria-describedby="youtube-privacy-notice-{{ view.getID() }}"></button>
+                <div class="privacy-notice">
+                    <span id="youtube-privacy-notice-{{ view.getID() }}"><?php echo esc_html($settings['notice_text']); ?></span>
+                    <a href="<?php echo esc_url($settings['privacy_url']); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($settings['link_text']); ?><span class="youtube-privacy-sr-only"> <?php echo esc_html__('(opens in a new tab)', 'youtube-privacy'); ?></span></a>
                 </div>
-            <# } #>
-            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 56px; background: rgba(255, 0, 0, 0.9); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
-                <div style="width: 0; height: 0; border-left: 16px solid white; border-top: 10px solid transparent; border-bottom: 10px solid transparent; margin-left: 4px;"></div>
             </div>
-            <div style="position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(0, 0, 0, 0.8); color: white; padding: 8px 12px; border-radius: 4px; font-size: 14px;">
-                Click to load video from YouTube. This will enable YouTube tracking. 
-                <a href="https://support.google.com/youtube/answer/10364219" target="_blank" style="color: #ccc; text-decoration: underline;">YouTube Privacy Information</a>
-            </div>
-        </div>
+        <# } #>
         <?php
     }
 }
-?>

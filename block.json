@@ -1,0 +1,44 @@
+{
+    "$schema": "https://schemas.wp.org/trunk/block.json",
+    "apiVersion": 3,
+    "name": "youtube-privacy/embed",
+    "title": "YouTube Privacy Embed",
+    "category": "embed",
+    "icon": "video-alt3",
+    "description": "Embed a YouTube video that only loads from YouTube after the visitor clicks.",
+    "keywords": [
+        "youtube",
+        "video",
+        "privacy",
+        "embed"
+    ],
+    "textdomain": "youtube-privacy",
+    "attributes": {
+        "videoUrl": {
+            "type": "string",
+            "default": ""
+        },
+        "videoTitle": {
+            "type": "string",
+            "default": ""
+        },
+        "thumbnailUrl": {
+            "type": "string",
+            "default": ""
+        }
+    },
+    "supports": {
+        "html": false,
+        "align": [
+            "wide",
+            "full"
+        ],
+        "spacing": {
+            "margin": true
+        }
+    },
+    "editorScript": "youtube-privacy-block-editor",
+    "editorStyle": "youtube-privacy-block-editor-style",
+    "style": "youtube-privacy-block-style",
+    "viewScript": "youtube-privacy-frontend"
+}

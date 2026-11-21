@@ -1,7 +1,40 @@
+/* Block editor only */
 
-.youtube-privacy-block-editor {
-    border: 2px dashed #ccc;
-    padding: 20px;
-    text-align: center;
-    background-color: #f9f9f9;
+.youtube-privacy-block-editor .youtube-embed-container {
+    cursor: default;
+}
+
+.youtube-privacy-block-editor .youtube-privacy-link {
+    color: #ccc;
+    text-decoration: underline;
+}
+
+.youtube-privacy-block-editor .components-placeholder .components-base-control {
+    width: 100%;
+}
+
+.youtube-privacy-title-control {
+    margin-top: 16px;
+}
+
+.youtube-privacy-thumbnail-control {
+    margin-top: 16px;
+}
+
+.youtube-privacy-thumbnail-label {
+    margin: 0 0 8px;
+}
+
+.youtube-privacy-thumbnail-preview {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    margin-bottom: 8px;
+    border-radius: 2px;
+}
+
+.youtube-privacy-remove-thumbnail {
+    display: block;
+    margin-top: 8px;
 }
